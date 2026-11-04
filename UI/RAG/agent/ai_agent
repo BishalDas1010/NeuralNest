@@ -1,0 +1,91 @@
+
+LangGraph chat agent with in-RAM persistence, powered by a free,
+keyless OpenAI-compatible endpoint (KeylessAI).
+
+from langchain_openai import ChatOpenAI
+import os
+from langchain_core.messages import HumanMessage
+from langchain_groq import ChatGroq
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.graph import MessagesState, START, END, StateGraph
+
+# llm = ChatGroq(
+#     model="llama-3.3-70b-versatile",
+#     temperature=0.1,
+# )
+llm = ChatOpenAI(
+    model="openai/gpt-oss-120b",
+    api_key=os.get_env("LLM_KEY"),
+    base_url="https://api.groq.com/openai/v1",
+    temperature=0.7,
+)
+
+# ----------------------------------------------------------------------
+# 2. Node — receives the full message history, returns the AI reply.
+# ----------------------------------------------------------------------
+def chatbot(state: MessagesState) -> dict:
+    reply = llm.invoke(state["messages"])
+    return {"messages": [reply]}
+
+
+# ----------------------------------------------------------------------
+# 3. Graph — single node, linear flow: START -> chatbot -> END
+# ----------------------------------------------------------------------
+builder = StateGraph(MessagesState)
+builder.add_node("chatbot", chatbot)
+builder.add_edge(START, "chatbot")
+builder.add_edge("chatbot", END)
+
+# MemorySaver keeps state in RAM, keyed by thread_id.
+# Restart the process and the chat is forgotten — exactly as requested.
+memory = MemorySaver()
+graph = builder.compile(checkpointer=memory)
+
+
+# ----------------------------------------------------------------------
+# 4. Interactive loop
+# ----------------------------------------------------------------------
+def chat_loop(thread_id: str = "user-1") -> None:
+    """
+    Talk to the agent forever. History is remembered between turns
+    because every call uses the same thread_id.
+    Type 'exit' or 'quit' to stop.
+    """
+    config = {"configurable": {"thread_id": thread_id}}
+
+    print("=" * 60)
+    print("  Chat started.  Type 'exit' or 'quit' to leave.")
+    print("=" * 60)
+
+    while True:
+        try:
+            user_input = input("\nYou: ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print("\nGoodbye!")
+            break
+
+        if not user_input:
+            continue
+
+        if user_input.lower() in ("exit", "quit"):
+            print("Goodbye!")
+            break
+
+        try:
+            result = graph.invoke(
+                {"messages": [HumanMessage(content=user_input)]},
+                config=config,
+            )
+        except Exception as e:
+            print(f"⚠️  AI error: {e}")
+            continue
+
+        ai_message = result["messages"][-1]
+        print(f"AI: {ai_message.content}")
+
+
+# ----------------------------------------------------------------------
+# Entry point
+# ----------------------------------------------------------------------
+if __name__ == "__main__":
+    chat_loop(thread_id="user-1")
