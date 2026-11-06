@@ -4,3 +4,11 @@ langchain-chroma
 langchain-huggingface
 sentence-transformers
 pypdf
+langchain-openai
+fastapi
+uvicorn
+python-multipart
+httpx
+pymupdf
+python-docx
+python-dotenv
